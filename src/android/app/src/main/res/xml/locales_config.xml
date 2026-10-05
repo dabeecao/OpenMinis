@@ -57,4 +57,7 @@
          plural rather than a fallback. Diacritics are č ć đ š ž only; the
          validator rejects Polish/Czech/Romanian look-alikes. -->
     <locale android:name="hr"/>
+    <!-- Vietnamese. CLDR defines a single cardinal category ("other") for vi,
+         so values-vi plurals carry only the "other" item. -->
+    <locale android:name="vi"/>
 </locale-config>

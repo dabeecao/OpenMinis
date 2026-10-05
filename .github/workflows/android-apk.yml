@@ -1,0 +1,150 @@
+name: Android APK
+
+# Builds a release APK (debug-signed; this fork has no upload keystore
+# configured) and uploads it as a workflow artifact.
+#
+# GitHub disables Actions on new forks by default: after pushing, open the
+# repo's Actions tab, click "I understand my workflows, go ahead and enable
+# them", then run this workflow manually (Run workflow -> main).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "17"
+  ANDROID_PLATFORM: "android-36"
+  ANDROID_BUILD_TOOLS: "35.0.0"
+  ANDROID_CMAKE: "3.22.1"
+  ANDROID_NDK: "29.0.14206865"
+  GO_VERSION: "1.26.8"
+  GO_SHA256: "d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b"
+  GOMOBILE_VERSION: "v0.0.0-20260908204917-8b95e45f8d3e"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+jobs:
+  build:
+    name: Build Minis APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Install build tools and Android SDK
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            curl tar unzip make gawk sed file python3 git
+          mkdir -p /usr/local/lib/android/sdk/cmdline-tools
+          cd /tmp
+          curl -sL -o cmdline-tools.zip \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q cmdline-tools.zip -d /tmp/sdk
+          mv /tmp/sdk/cmdline-tools /usr/local/lib/android/sdk/cmdline-tools/latest
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "cmake;${ANDROID_CMAKE}" \
+            "ndk;${ANDROID_NDK}"
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/${ANDROID_NDK}" >> "$GITHUB_ENV"
+
+      - name: Build PRoot (assets/proot-aarch64 + jniLibs/libproot.so)
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK }}
+        run: bash deps/build_proot.sh
+
+      - name: Prepare sandbox assets (Alpine minirootfs)
+        run: |
+          chmod +x scripts/prepare_android_sandbox.sh
+          bash scripts/prepare_android_sandbox.sh
+          test -s src/android/app/src/main/assets/alpine-minirootfs.tar.gz
+          test -s src/android/app/src/main/assets/proot-aarch64
+
+      - name: Install Go and gomobile, build rclone AAR
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK }}
+          GOTOOLCHAIN: local
+          GOPROXY: "https://proxy.golang.org,direct"
+          GODEBUG: "http2client=0"
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+          echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c -
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/local/go/bin:${PATH}"
+          go version | grep -F "go${GO_VERSION}"
+          retry() {
+            local attempt=1 max=5 delay=5
+            while true; do
+              if "$@"; then return 0; fi
+              if [ "$attempt" -ge "$max" ]; then echo "failed after ${max} attempts: $*" >&2; return 1; fi
+              echo "attempt ${attempt} failed, retrying in ${delay}s: $*" >&2
+              sleep "$delay"; attempt=$((attempt + 1)); delay=$((delay * 2))
+            done
+          }
+          retry go install "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_VERSION}"
+          gopath_bin="$(go env GOPATH)/bin"
+          echo "$gopath_bin" >> "$GITHUB_PATH"
+          export PATH="${PATH}:${gopath_bin}"
+          retry gomobile init
+          retry bash deps/build_rclone_android.sh
+          mkdir -p src/android/app/libs
+          cp deps/build/rclone/rclone.aar src/android/app/libs/rclone.aar
+          test -s src/android/app/libs/rclone.aar
+
+      - name: Provider customization stub
+        run: |
+          test -f src/android/app/provider-customization.properties \
+            || cp src/android/app/provider-customization.properties.example \
+                  src/android/app/provider-customization.properties
+
+      - name: Assemble release APK (debug-signed)
+        working-directory: src/android
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK }}
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          sed -i 's|^org.gradle.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8|' gradle.properties
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --no-parallel --stacktrace
+
+      - name: Stage APK
+        run: |
+          SRC=src/android/app/build/outputs/apk/release/app-release.apk
+          test -s "$SRC"
+          mkdir -p dist
+          cp "$SRC" dist/OpenMinis-vi.apk
+          unzip -l "$SRC" | grep -E "libproot|proot-aarch64|alpine-minirootfs|rclone" || true
+          ls -lh dist/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMinis-vi-APK
+          path: dist/OpenMinis-vi.apk
+          if-no-files-found: error
