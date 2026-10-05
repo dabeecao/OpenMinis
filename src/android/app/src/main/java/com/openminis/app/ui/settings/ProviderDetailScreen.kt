@@ -610,6 +610,11 @@ fun ProviderDetailScreen(
             )
 
             entries.forEachIndexed { idx, entry ->
+                // [T-android-model-absence-grace] Mirror the iOS modelEntryRow:
+                // a catalog entry the provider stopped listing is kept through
+                // the grace window, so say why the row is dimmed instead of
+                // letting it look normal — or letting it silently vanish.
+                val notListed = entry.isUnavailableFromProvider
                 // Drive both tap and long-press from a Box wrapper so we
                 // don't have to expand SettingsRow's signature.
                 Box(
@@ -620,8 +625,9 @@ fun ProviderDetailScreen(
                         // active models — the " • Hidden" subtitle suffix alone
                         // wasn't enough for users to tell them apart. alpha is
                         // visual-only, so the row stays tappable to re-show the
-                        // model from its detail screen.
-                        .then(if (entry.isHidden) Modifier.alpha(0.45f) else Modifier)
+                        // model from its detail screen. Absent entries dim the
+                        // same way, mirroring the iOS greyed-out row.
+                        .then(if (entry.isHidden || notListed) Modifier.alpha(0.45f) else Modifier)
                         .combinedClickable(
                             onClick = { onModelEntryClick(entry.id) },
                             // [T-android-model-row-hide-action] Long-press now
@@ -665,6 +671,7 @@ fun ProviderDetailScreen(
                         subtitle = buildString {
                             append(entry.model.id)
                             if (entry.isHidden) append(" • Hidden")
+                            if (notListed) append(" • " + stringResource(R.string.model_not_listed_by_provider))
                         },
                         // onClick = null so SettingsRow doesn't add a second
                         // clickable that would swallow the long-press. The
@@ -730,7 +737,15 @@ fun ProviderDetailScreen(
                                 )
                             },
                         )
-                        if (entry.isCustom) {
+                        // Delete: custom entries, plus catalog entries the provider
+                        // stopped listing. The latter mirrors the iOS per-row
+                        // trash button — the entry is already unlisted, so
+                        // deleting it now only skips the rest of the absence
+                        // grace window; if the model comes back, the next
+                        // refresh re-adds it. (Built-in template entries stay
+                        // non-deletable: the repo re-creates them from
+                        // ProviderType.builtInModels on the next refresh.)
+                        if (entry.isCustom || notListed) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
