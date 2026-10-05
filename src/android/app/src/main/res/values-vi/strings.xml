@@ -1107,6 +1107,8 @@
     <string name="provider_detail_refresh_models">Làm mới mô hình</string>
     <string name="provider_refresh_auth_failed_title">Phiên đăng nhập đã hết hạn</string>
     <string name="provider_refresh_auth_failed_body">Không thể làm mới danh sách mô hình vì nhà cung cấp này đã từ chối phiên đăng nhập đã lưu. Hãy đăng nhập lại, rồi làm mới.</string>
+    <string name="provider_refresh_failed_title">Không làm mới được danh sách mô hình</string>
+    <string name="provider_refresh_failed_body">Không gọi được nhà cung cấp và cũng không có nguồn dự phòng nào có danh sách mô hình, nên giữ nguyên danh sách cũ.\n\nChi tiết: %1$s</string>
     <string name="provider_detail_add_custom_model">Thêm mô hình tùy chỉnh</string>
     <string name="provider_detail_delete_provider">Xóa nhà cung cấp</string>
     <string name="provider_detail_delete_model">Xóa mô hình</string>

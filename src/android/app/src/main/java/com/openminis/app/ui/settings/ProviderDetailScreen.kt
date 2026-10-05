@@ -170,6 +170,9 @@ fun ProviderDetailScreen(
     // leaving the old list on screen, which would read as a successful refresh
     // while the account is signed out.
     var refreshAuthError by remember { mutableStateOf(false) }
+    // [T-android-refresh-error-parity] Message from a refresh that reached no
+    // model source — mirrors the iOS red fetchError.
+    var refreshError by remember { mutableStateOf<String?>(null) }
 
     val exportContext = androidx.compose.ui.platform.LocalContext.current
 
@@ -581,13 +584,31 @@ fun ProviderDetailScreen(
                     {
                         isRefreshing = true
                         refreshAuthError = false
+                        refreshError = null
                         scope.launch {
                             try {
                                 // [T-codex-dynamic-discovery GH#319]
                                 // forceRefresh: this is the manual Refresh tap,
                                 // which must bypass the discovery cache — a
                                 // Refresh that returns a cached list is not one.
-                                providerRepository.refreshModels(instance, forceRefresh = true)
+                                //
+                                // [T-android-refresh-error-parity] Surface a
+                                // refresh that reached no source, mirroring the
+                                // iOS fetchError: silently keeping the old list
+                                // reads as success while the provider may have
+                                // moved on (e.g. a model deleted at the
+                                // provider is never flagged absent when the
+                                // vendor call itself failed).
+                                providerRepository.refreshModels(
+                                    instance,
+                                    forceRefresh = true,
+                                    // Post back to the screen scope: the repo
+                                    // tail may resume off the main thread, and
+                                    // Compose state must be written on Main.
+                                    onRefreshError = { msg ->
+                                        scope.launch { refreshError = msg }
+                                    },
+                                )
                                 AppLogger.info(TAG, "Refreshed models for ${instance.id}")
                             } catch (e: com.openminis.app.data.repository.CodexDiscoveryAuthException) {
                                 AppLogger.warning(TAG, "Refresh rejected credential: ${e.message}")
@@ -822,6 +843,21 @@ fun ProviderDetailScreen(
             confirmText = stringResource(R.string.ok),
             dismissText = stringResource(R.string.common_close),
             onConfirm = { refreshAuthError = false },
+        )
+    }
+
+    // [T-android-refresh-error-parity] A refresh that reached no model source
+    // must not read as success — mirror of the iOS red fetchError, so the
+    // user knows the list on screen may be stale (e.g. a model deleted at the
+    // provider was never re-checked).
+    refreshError?.let { msg ->
+        MinisAlertDialog(
+            onDismissRequest = { refreshError = null },
+            title = stringResource(R.string.provider_refresh_failed_title),
+            text = stringResource(R.string.provider_refresh_failed_body, msg),
+            confirmText = stringResource(R.string.ok),
+            dismissText = stringResource(R.string.common_close),
+            onConfirm = { refreshError = null },
         )
     }
 
