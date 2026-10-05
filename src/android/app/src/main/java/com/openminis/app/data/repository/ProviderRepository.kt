@@ -2515,11 +2515,18 @@ class ProviderRepository(private val context: Context) {
      *   models.dev fallback exactly as before; this only lets a caller that has
      *   to explain an empty list (onboarding's model picker) show the provider's
      *   own words instead of an endless spinner.
+     * @param onRefreshError invoked when the refresh could not obtain a model
+     *   list from ANY source (vendor API, models.dev fallback, built-in) and
+     *   the existing entries were kept untouched. Mirrors the iOS red
+     *   fetchError: a manual refresh that silently keeps a stale list reads as
+     *   success while the provider may have moved on — e.g. a model deleted at
+     *   the provider is never flagged absent because the vendor call failed.
      */
     suspend fun refreshModels(
         instance: ProviderInstance,
         forceRefresh: Boolean = false,
         onVendorError: ((String) -> Unit)? = null,
+        onRefreshError: ((String) -> Unit)? = null,
     ) {
         // [T-android-refresh-models-empty-key] usableApiKey, NOT loadApiKey.
         //
@@ -2587,6 +2594,13 @@ class ProviderRepository(private val context: Context) {
 
         android.util.Log.i("ProviderRepo", "refreshModels: id=${instance.id} type=${instance.providerType} credential=${instance.credentialType} hasKey=${apiKey != null} keyLen=${apiKey?.length ?: 0} baseURL=${instance.effectiveBaseURL}")
 
+        // [T-android-refresh-error-parity] Track whether any source produced a
+        // list, and remember the vendor failure's message, so a refresh that
+        // reached nothing can be reported instead of silently keeping a stale
+        // list (mirrors the iOS fetchError).
+        var didRefresh = false
+        var vendorError: String? = null
+
         // [T-codex-dynamic-discovery GH#319] OpenAI Codex OAuth: three-tier
         // discovery, replacing what used to be an unconditional return of the
         // compiled-in list.
@@ -2606,6 +2620,7 @@ class ProviderRepository(private val context: Context) {
         ) {
             val discovered = discoverCodexModels(instance, apiKey, forceRefresh)
             if (discovered != null) {
+                didRefresh = true
                 replaceEntries(instance.id, discovered)
                 return
             }
@@ -2619,6 +2634,7 @@ class ProviderRepository(private val context: Context) {
             val builtIn = OpenAIModelsApi.fetchModelsOAuth()
             if (builtIn.isNotEmpty()) {
                 android.util.Log.i("ProviderRepo", "Codex discovery unavailable — using built-in list (${builtIn.size})")
+                didRefresh = true
                 replaceEntries(instance.id, builtIn)
                 return
             }
@@ -2773,7 +2789,9 @@ class ProviderRepository(private val context: Context) {
                 // failure and still falls through to models.dev as before.
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 android.util.Log.e("ProviderRepo", "refreshModels fetch error: ${e.message}", e)
-                onVendorError?.invoke(e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName)
+                val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                vendorError = msg
+                onVendorError?.invoke(msg)
                 emptyList()
             }
             android.util.Log.i("ProviderRepo", "refreshModels: got ${models.size} models")
@@ -2787,6 +2805,7 @@ class ProviderRepository(private val context: Context) {
 
             // Step 2: If API returned results, use them
             if (models.isNotEmpty()) {
+                didRefresh = true
                 replaceEntries(instance.id, models)
                 return
             }
@@ -2807,9 +2826,19 @@ class ProviderRepository(private val context: Context) {
                 "[Restore][DIAG] refreshModels STEP3(models.dev-fallback) id=${instance.id} models=" +
                     fallbackModels.joinToString { m -> "(id=${m.id}, displayName=${m.displayName})" },
             )
+            didRefresh = true
             replaceEntries(instance.id, fallbackModels)
         } else if (isThirdParty) {
             android.util.Log.i("ProviderRepo", "Third-party endpoint, no models.dev match — preserving existing models for ${instance.label}")
+        }
+
+        // [T-android-refresh-error-parity] Nothing produced a list: the entries
+        // on screen are stale, so say so instead of reading as success.
+        // Mirrors the iOS fetchError shown when fetchModelsWithFallback throws.
+        if (!didRefresh) {
+            val reason = vendorError ?: "no model source responded"
+            android.util.Log.w("ProviderRepo", "refreshModels: no source produced a list for ${instance.id}; kept existing entries ($reason)")
+            onRefreshError?.invoke(reason)
         }
     }
 

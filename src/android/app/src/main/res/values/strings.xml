@@ -1111,6 +1111,8 @@
     <string name="provider_detail_refresh_models">Refresh Models</string>
     <string name="provider_refresh_auth_failed_title">Sign-in expired</string>
     <string name="provider_refresh_auth_failed_body">The model list could not be refreshed because this provider rejected the saved sign-in. Sign in again, then refresh.</string>
+    <string name="provider_refresh_failed_title">Couldn't refresh model list</string>
+    <string name="provider_refresh_failed_body">The provider could not be reached and no fallback source had a model list, so the existing list was kept.\n\nDetails: %1$s</string>
     <string name="provider_detail_add_custom_model">Add Custom Model</string>
     <string name="provider_detail_delete_provider">Delete Provider</string>
     <string name="provider_detail_delete_model">Delete Model</string>
