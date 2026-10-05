@@ -1217,7 +1217,7 @@
     <!-- [T-android-model-absence-grace] Shown when the provider has stopped
          listing a model; the entry is retained with its overrides through the
          grace window rather than being deleted. -->
-    <string name="model_not_listed_by_provider">Không được nhà cung cấp liệt kê</string>
+    <string name="model_not_listed_by_provider">Không còn được liệt kê</string>
     <string name="model_group_detail_more_options">Tùy chọn khác</string>
     <string name="model_group_detail_remove_from_group">Xóa khỏi nhóm</string>
     <string name="model_group_detail_add_models">Thêm mô hình</string>
