@@ -234,6 +234,10 @@ private val languageOptions = listOf(
     // categories (one/few/other) and NO "many" \u2014 unlike Polish, so the
     // counts pl sends to `many` land on `other` here.
     LanguageOption("hr", "\uD83C\uDDED\uD83C\uDDF7", "Hrvatski"),
+    // vi: flag \uD83C\uDDFB\uD83C\uDDF3 (VN), self-name Tiếng Việt. CLDR has a
+    // single cardinal category ("other") for Vietnamese, so values-vi plurals
+    // carry only the "other" item.
+    LanguageOption("vi", "\uD83C\uDDFB\uD83C\uDDF3", "Tiếng Việt"),
 )
 
 fun getAppearancePrefs(context: Context): SharedPreferences =
